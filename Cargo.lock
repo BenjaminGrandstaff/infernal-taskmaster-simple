@@ -482,7 +482,7 @@ dependencies = [
 [[package]]
 name = "infernal-client-rs"
 version = "0.1.0"
-source = "git+https://github.com/BenjaminGrandstaff/infernal-client-rs?rev=62926a3e2f6d5384291983f770bf205aeb574af2#62926a3e2f6d5384291983f770bf205aeb574af2"
+source = "git+https://github.com/BenjaminGrandstaff/infernal-client-rs?rev=be3244add8899e253686cdccdf59d8ea71ea79ac#be3244add8899e253686cdccdf59d8ea71ea79ac"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -498,6 +498,7 @@ dependencies = [
 name = "infernal-taskmaster-simple"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "infernal-client-rs",
  "serde",
  "serde_json",

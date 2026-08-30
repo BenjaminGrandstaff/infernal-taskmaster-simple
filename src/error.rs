@@ -15,6 +15,12 @@ pub enum TaskmasterError {
     MalformedResponse(String),
     /// `KERNEL_CA_CERT_PATH` was set but the file could not be read.
     CaCertificateUnreadable(std::io::Error),
+    /// `ENROLLMENT_CHALLENGE` was set but the projected ServiceAccount
+    /// token file it implies (`WORKLOAD_TOKEN_PATH`) could not be read.
+    EnrollmentTokenUnreadable(std::io::Error),
+    /// `ENROLLMENT_CHALLENGE` was not a valid base64url-encoded 32-byte
+    /// value.
+    InvalidEnrollmentChallenge,
 }
 
 impl Display for TaskmasterError {
@@ -33,6 +39,12 @@ impl Display for TaskmasterError {
             }
             Self::CaCertificateUnreadable(error) => {
                 write!(formatter, "could not read KERNEL_CA_CERT_PATH: {error}")
+            }
+            Self::EnrollmentTokenUnreadable(error) => {
+                write!(formatter, "could not read WORKLOAD_TOKEN_PATH: {error}")
+            }
+            Self::InvalidEnrollmentChallenge => {
+                formatter.write_str("ENROLLMENT_CHALLENGE is not a valid base64url 32-byte value")
             }
         }
     }

@@ -17,7 +17,10 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use infernal_client::{Client, ClientCredential, RequestParts, SignedRequest};
+use infernal_client::{
+    CHALLENGE_LENGTH, Client, ClientCredential, EnrolledInstance, EnrollmentSubmission,
+    RequestParts, SignedRequest,
+};
 use uuid::Uuid;
 
 use crate::claims::{ClaimOutcome, ClaimRequest, parse_claim_response};
@@ -76,6 +79,34 @@ impl KernelClient {
             credential,
             authority: authority.into(),
         })
+    }
+
+    /// Performs ADR-0008 initial enrollment: signs a proof binding
+    /// `challenge` to this process's own credential and submits it to
+    /// `POST /v1/enrollments`. `challenge` comes from a kernel operator's
+    /// own out-of-band challenge issuance -- there is no self-service call
+    /// for requesting one (see `infernal_client::EnrollmentSubmission`'s
+    /// own documentation for why). Must be called with the very credential
+    /// this `KernelClient` will go on to sign ordinary requests with:
+    /// enrollment registers a specific public key, not a service identity
+    /// in the abstract.
+    pub fn enroll(
+        &self,
+        challenge: [u8; CHALLENGE_LENGTH],
+        endpoint: &str,
+        pod_uid: &str,
+        workload_token: String,
+    ) -> Result<EnrolledInstance, TaskmasterError> {
+        let submission = EnrollmentSubmission::sign(
+            &self.credential,
+            challenge,
+            endpoint,
+            pod_uid,
+            workload_token,
+        )?;
+        Ok(self
+            .client
+            .submit_enrollment(&format!("https://{}", self.authority), &submission)?)
     }
 }
 

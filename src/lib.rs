@@ -30,6 +30,29 @@ const POLL_INTERVAL_SECONDS_ENV: &str = "POLL_INTERVAL_SECONDS";
 /// only behind a private or self-signed CA. Optional: a kernel with an
 /// ordinary publicly-trusted certificate needs no configuration here.
 const KERNEL_CA_CERT_PATH_ENV: &str = "KERNEL_CA_CERT_PATH";
+/// A base64url-encoded, 32-byte ADR-0008 enrollment challenge, from a
+/// kernel operator's own out-of-band challenge issuance -- infernal-law has
+/// no self-service HTTP call for requesting one (see
+/// `infernal_client::EnrollmentSubmission`'s own documentation for why).
+/// Optional: unset entirely if this process's identity was already
+/// enrolled some other way (or does not need to be, for a kernel not
+/// requiring ADR-0008 enrollment). When set, `SERVICE_ENDPOINT` and
+/// `POD_UID` become required.
+const ENROLLMENT_CHALLENGE_ENV: &str = "ENROLLMENT_CHALLENGE";
+/// This process's own HTTPS endpoint, submitted as part of the enrollment
+/// proof. This service has no inbound listener of its own (it only ever
+/// makes outbound calls), so nothing currently connects to this address --
+/// it is recorded by the kernel as instance metadata, not verified for
+/// reachability at enrollment time.
+const SERVICE_ENDPOINT_ENV: &str = "SERVICE_ENDPOINT";
+/// This Pod's own UID, for example from the Kubernetes Downward API
+/// (`fieldRef: metadata.uid`) -- must match the Pod UID Kubernetes binds to
+/// the workload token at `WORKLOAD_TOKEN_PATH`.
+const POD_UID_ENV: &str = "POD_UID";
+/// Path to this Pod's own projected ServiceAccount token for the
+/// `infernal-law-enrollment` audience.
+const WORKLOAD_TOKEN_PATH_ENV: &str = "WORKLOAD_TOKEN_PATH";
+const DEFAULT_WORKLOAD_TOKEN_PATH: &str = "/var/run/secrets/infernal-law-enrollment/token";
 const DEFAULT_LEASE_SECONDS: i64 = 300;
 const DEFAULT_POLL_INTERVAL_SECONDS: u64 = 5;
 
@@ -70,12 +93,39 @@ impl Config {
             }
             Err(_) => KernelClient::new(credential, authority)?,
         };
+        if let Ok(challenge) = env::var(ENROLLMENT_CHALLENGE_ENV) {
+            let endpoint = env::var(SERVICE_ENDPOINT_ENV)
+                .map_err(|_| TaskmasterError::MissingEnv(SERVICE_ENDPOINT_ENV))?;
+            let pod_uid =
+                env::var(POD_UID_ENV).map_err(|_| TaskmasterError::MissingEnv(POD_UID_ENV))?;
+            let token_path = env::var(WORKLOAD_TOKEN_PATH_ENV)
+                .unwrap_or_else(|_| DEFAULT_WORKLOAD_TOKEN_PATH.to_owned());
+            let workload_token = std::fs::read_to_string(&token_path)
+                .map_err(TaskmasterError::EnrollmentTokenUnreadable)?
+                .trim()
+                .to_owned();
+            let challenge = decode_challenge(&challenge)?;
+            let enrolled = client.enroll(challenge, &endpoint, &pod_uid, workload_token)?;
+            println!("enrolled with the kernel: {enrolled:?}");
+        }
         Ok(Self {
             client,
             lease_seconds,
             poll_interval: Duration::from_secs(poll_interval_seconds),
         })
     }
+}
+
+fn decode_challenge(
+    value: &str,
+) -> Result<[u8; infernal_client::CHALLENGE_LENGTH], TaskmasterError> {
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| TaskmasterError::InvalidEnrollmentChallenge)?
+        .try_into()
+        .map_err(|_| TaskmasterError::InvalidEnrollmentChallenge)
 }
 
 /// Runs the scheduling loop forever: poll, propose, sleep, repeat. A
