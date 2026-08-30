@@ -98,6 +98,15 @@ live kernel connection; `src/scheduler.rs`'s FIFO policy sits behind a
   example `infernal-law`'s own TLS-terminating sidecar in a local or test
   cluster — see that repo's README). Omit for a kernel with an ordinary
   publicly-trusted certificate.
+- `ENROLLMENT_CHALLENGE` (optional) — a base64url-encoded, 32-byte ADR-0008
+  enrollment challenge from a kernel operator's own out-of-band challenge
+  issuance (infernal-law has no self-service HTTP call for requesting
+  one). When set, `SERVICE_ENDPOINT` and `POD_UID` become required, and
+  `WORKLOAD_TOKEN_PATH` (default
+  `/var/run/secrets/infernal-law-enrollment/token`) must point at this
+  Pod's own projected `infernal-law-enrollment`-audience ServiceAccount
+  token. Unset (the default) skips enrollment entirely — for an identity
+  already enrolled some other way.
 
 ## Status
 
@@ -111,15 +120,21 @@ kernel port, including that a lost claim race is reported, not treated as
 an error.
 
 Deployed into a real Kubernetes cluster alongside `infernal-law` and
-`infernal-inquisitor-simple` and confirmed to complete a real signed
-HTTPS call to the kernel end to end: with `KERNEL_CA_CERT_PATH` pointed at
-`infernal-law`'s TLS-terminating sidecar certificate (see that repo's
-README), this service's request reaches the kernel, passes signature
-verification, and receives the kernel's correct, well-formed `401` for an
-identity that is not yet enrolled — not a transport or TLS error. The only
-remaining gap before a full round trip is genuine infrastructure, not
-code: real ADR-0008 Kubernetes TokenReview enrollment for this service's
-identity has not been performed in this test cluster.
+`infernal-inquisitor-simple` and confirmed to complete a real, fully
+enrolled signed round trip end to end: with a real ADR-0008 challenge
+provisioned out-of-band and `ENROLLMENT_CHALLENGE` set, this service
+enrolls a fresh instance key against the kernel's live Kubernetes
+TokenReview integration, then polls `GET /v1/routes/eligible`
+successfully and continuously — no transport, TLS, authentication, or
+authorization errors. (Getting this working also surfaced two real
+kernel-side bugs, since fixed: the kernel's own TokenReview CA
+certificate was unreadable by its non-root container user, and a signed
+call needs its identity's communication-admission row explicitly enabled,
+the same out-of-band way as other kernel administrative state, before any
+governed route succeeds.) What has not yet been exercised for real is the
+rest of the vertical slice — nothing in this ecosystem yet submits a
+signed `POST /v1/requests`, so a full submit-to-complete round trip needs
+a separate enrolled test identity for that role.
 
 ## Development
 
