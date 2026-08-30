@@ -1,8 +1,13 @@
-//! Reference FIFO/priority scheduler for the infernal-law kernel.
-//!
-//! Waits on the kernel's eligible-route contract (ILK-010/ILK-011), which is
-//! not yet implemented kernel-side, so there is nothing to schedule yet.
+//! Goal: start the process while keeping all testable behavior in the
+//! library crate.
 
 fn main() {
-    println!("infernal-taskmaster-simple: no kernel eligible-route contract available yet");
+    let config = match infernal_taskmaster_simple::Config::from_env() {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("configuration error: {error}");
+            std::process::exit(1);
+        }
+    };
+    infernal_taskmaster_simple::run(config);
 }
