@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infernal-taskmaster-simple
+  labels:
+    app.kubernetes.io/name: infernal-taskmaster-simple
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: infernal-taskmaster-simple
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: infernal-taskmaster-simple
+    spec:
+      automountServiceAccountToken: false
+      serviceAccountName: infernal-taskmaster-simple
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: infernal-taskmaster-simple
+          image: localhost/infernal-taskmaster-simple:latest
+          imagePullPolicy: IfNotPresent
+          # No ports: this service only ever makes outbound signed calls
+          # into the kernel: it never listens for inbound connections, so
+          # it has no HTTP surface for a liveness/readiness probe to
+          # check. Kubernetes' own container restart policy is what
+          # recovers a crashed process.
+          env:
+            # In-cluster DNS name of infernal-law's own Service
+            # (k8s/base/service.yaml in that repo). infernal-client-rs's
+            # SignedRequest always dials https://<authority> -- unlike
+            # infernal-inquisitor-simple's fetch_kernel_identity, which
+            # accepts an arbitrary scheme, this service's outbound calls
+            # require the kernel to actually terminate TLS at this
+            # authority. infernal-law's own Service does not do that yet
+            # (see that repo's k8s/base/service.yaml); a TLS-terminating
+            # layer in front of it is required before this deployment can
+            # actually reach the kernel, not just start.
+            - name: KERNEL_AUTHORITY
+              value: "infernal-law"
+            # Must already be provisioned as an identities row and
+            # enrolled with the kernel (ADR-0008) before any call this
+            # process signs will be accepted -- deployment configuration,
+            # not something this manifest or the image itself performs.
+            - name: TASKMASTER_SERVICE_ID
+              value: "00000000-0000-4000-8000-000000000002"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 250m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+      terminationGracePeriodSeconds: 10

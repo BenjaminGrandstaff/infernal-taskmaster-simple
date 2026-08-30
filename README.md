@@ -102,11 +102,22 @@ and `src/claims.rs` mirror the kernel's actual JSON shapes field-for-field,
 `src/kernel_client.rs`'s signed requests are proven correct without a live
 connection, and `src/scheduler.rs`'s FIFO policy is proven against a fake
 kernel port, including that a lost claim race is reported, not treated as
-an error. Not yet exercised: an actual signed round trip against a live,
-enrolled kernel process (this requires real ADR-0008 Kubernetes-TokenReview
-enrollment and a reachable HTTPS kernel, neither of which a unit-test
-sandbox can provide) and wiring a reference worker on the other end of a
-claimed route.
+an error.
+
+Deployed into a real Kubernetes cluster alongside `infernal-law` and
+`infernal-inquisitor-simple` and confirmed to start, read its
+configuration, and attempt its signed calls correctly: it logs a clear
+transport error and keeps retrying rather than crashing, exactly as
+designed. It has not yet completed an actual signed round trip against a
+live kernel, for two independent reasons, both deployment configuration
+rather than code gaps: real ADR-0008 Kubernetes TokenReview enrollment for
+this service's identity has not been performed, and — confirmed directly,
+not just inferred — `infernal-client-rs`'s `SignedRequest` always dials
+`https://<authority>` while `infernal-law`'s own Kubernetes `Service` does
+not terminate TLS (see `k8s/base/deployment.yaml`'s `KERNEL_AUTHORITY`
+comment); a TLS-terminating layer in front of the kernel is required
+before this or `infernal-worker-simple` can actually complete a call, not
+just attempt one.
 
 ## Development
 
@@ -114,6 +125,41 @@ claimed route.
 cargo build
 cargo test
 ```
+
+## Podman
+
+```sh
+podman build -t localhost/infernal-taskmaster-simple:latest .
+podman run --rm --network infernal-law \
+  --env KERNEL_AUTHORITY='infernal-law' \
+  --env TASKMASTER_SERVICE_ID='00000000-0000-4000-8000-000000000002' \
+  localhost/infernal-taskmaster-simple:latest
+```
+
+Join it to the same Podman network as a locally running `infernal-law` (see
+that repo's own `README.md`) to reach it by container name. As noted in
+Status above, the call will still fail at the TLS layer until the kernel
+terminates TLS at that authority — this proves configuration and transport
+wiring, not a complete round trip.
+
+## Kubernetes
+
+The base manifests are in [`k8s/base`](k8s/base). Preview or apply them with
+the Kustomize support built into `kubectl`:
+
+```sh
+kubectl kustomize k8s/base
+kubectl apply -k k8s/base
+```
+
+There is no `Service`: this process only ever makes outbound calls, so it
+has nothing to be reached on. `KERNEL_AUTHORITY` and `TASKMASTER_SERVICE_ID`
+in [`k8s/base/deployment.yaml`](k8s/base/deployment.yaml) default to
+`infernal-law`'s own in-cluster `Service` name and a placeholder service
+ID — adjust both for your deployment, and provision/enroll that service ID
+with the kernel out of band (ADR-0008) before expecting a call to succeed.
+No Kubernetes RBAC is needed here: this service never calls the Kubernetes
+API itself.
 
 ## License
 
