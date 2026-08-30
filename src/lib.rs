@@ -25,6 +25,11 @@ const KERNEL_AUTHORITY_ENV: &str = "KERNEL_AUTHORITY";
 const TASKMASTER_SERVICE_ID_ENV: &str = "TASKMASTER_SERVICE_ID";
 const CLAIM_LEASE_SECONDS_ENV: &str = "CLAIM_LEASE_SECONDS";
 const POLL_INTERVAL_SECONDS_ENV: &str = "POLL_INTERVAL_SECONDS";
+/// Path to a PEM-encoded certificate authority this process should trust
+/// in addition to the default public root store, for a kernel reachable
+/// only behind a private or self-signed CA. Optional: a kernel with an
+/// ordinary publicly-trusted certificate needs no configuration here.
+const KERNEL_CA_CERT_PATH_ENV: &str = "KERNEL_CA_CERT_PATH";
 const DEFAULT_LEASE_SECONDS: i64 = 300;
 const DEFAULT_POLL_INTERVAL_SECONDS: u64 = 5;
 
@@ -58,7 +63,13 @@ impl Config {
             .and_then(|value| value.parse().ok())
             .unwrap_or(DEFAULT_POLL_INTERVAL_SECONDS);
         let credential = ClientCredential::generate(service_id);
-        let client = KernelClient::new(credential, authority)?;
+        let client = match env::var(KERNEL_CA_CERT_PATH_ENV) {
+            Ok(path) => {
+                let pem = std::fs::read(&path).map_err(TaskmasterError::CaCertificateUnreadable)?;
+                KernelClient::with_extra_root_certificate(credential, authority, &pem)?
+            }
+            Err(_) => KernelClient::new(credential, authority)?,
+        };
         Ok(Self {
             client,
             lease_seconds,

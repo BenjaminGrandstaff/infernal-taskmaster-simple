@@ -92,6 +92,12 @@ live kernel connection; `src/scheduler.rs`'s FIFO policy sits behind a
   each claim.
 - `POLL_INTERVAL_SECONDS` (default `5`) — how often to poll
   `GET /v1/routes/eligible`.
+- `KERNEL_CA_CERT_PATH` (optional) — path to a PEM-encoded certificate
+  authority to trust in addition to the default public root store, for a
+  kernel reachable only behind a private or self-signed certificate (for
+  example `infernal-law`'s own TLS-terminating sidecar in a local or test
+  cluster — see that repo's README). Omit for a kernel with an ordinary
+  publicly-trusted certificate.
 
 ## Status
 
@@ -105,19 +111,15 @@ kernel port, including that a lost claim race is reported, not treated as
 an error.
 
 Deployed into a real Kubernetes cluster alongside `infernal-law` and
-`infernal-inquisitor-simple` and confirmed to start, read its
-configuration, and attempt its signed calls correctly: it logs a clear
-transport error and keeps retrying rather than crashing, exactly as
-designed. It has not yet completed an actual signed round trip against a
-live kernel, for two independent reasons, both deployment configuration
-rather than code gaps: real ADR-0008 Kubernetes TokenReview enrollment for
-this service's identity has not been performed, and — confirmed directly,
-not just inferred — `infernal-client-rs`'s `SignedRequest` always dials
-`https://<authority>` while `infernal-law`'s own Kubernetes `Service` does
-not terminate TLS (see `k8s/base/deployment.yaml`'s `KERNEL_AUTHORITY`
-comment); a TLS-terminating layer in front of the kernel is required
-before this or `infernal-worker-simple` can actually complete a call, not
-just attempt one.
+`infernal-inquisitor-simple` and confirmed to complete a real signed
+HTTPS call to the kernel end to end: with `KERNEL_CA_CERT_PATH` pointed at
+`infernal-law`'s TLS-terminating sidecar certificate (see that repo's
+README), this service's request reaches the kernel, passes signature
+verification, and receives the kernel's correct, well-formed `401` for an
+identity that is not yet enrolled — not a transport or TLS error. The only
+remaining gap before a full round trip is genuine infrastructure, not
+code: real ADR-0008 Kubernetes TokenReview enrollment for this service's
+identity has not been performed in this test cluster.
 
 ## Development
 
@@ -137,10 +139,10 @@ podman run --rm --network infernal-law \
 ```
 
 Join it to the same Podman network as a locally running `infernal-law` (see
-that repo's own `README.md`) to reach it by container name. As noted in
-Status above, the call will still fail at the TLS layer until the kernel
-terminates TLS at that authority — this proves configuration and transport
-wiring, not a complete round trip.
+that repo's own `README.md`) to reach it by container name. If that
+kernel's own TLS-terminating layer uses a self-signed certificate, also
+set `KERNEL_CA_CERT_PATH` to a mounted copy of it — otherwise the call
+fails at the TLS layer rather than reaching the kernel at all.
 
 ## Kubernetes
 

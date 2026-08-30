@@ -13,6 +13,8 @@ pub enum TaskmasterError {
     Client(ClientError),
     UnexpectedStatus(u16),
     MalformedResponse(String),
+    /// `KERNEL_CA_CERT_PATH` was set but the file could not be read.
+    CaCertificateUnreadable(std::io::Error),
 }
 
 impl Display for TaskmasterError {
@@ -28,6 +30,9 @@ impl Display for TaskmasterError {
             }
             Self::MalformedResponse(message) => {
                 write!(formatter, "malformed kernel response: {message}")
+            }
+            Self::CaCertificateUnreadable(error) => {
+                write!(formatter, "could not read KERNEL_CA_CERT_PATH: {error}")
             }
         }
     }

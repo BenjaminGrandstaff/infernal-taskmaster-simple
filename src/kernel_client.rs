@@ -60,6 +60,23 @@ impl KernelClient {
             authority: authority.into(),
         })
     }
+
+    /// Like [`KernelClient::new`], but additionally trusts
+    /// `extra_root_certificate_pem` -- for a kernel reachable only behind
+    /// a private or self-signed certificate authority (for example a
+    /// TLS-terminating sidecar inside a private cluster network), which
+    /// this crate's default public root store would otherwise reject.
+    pub fn with_extra_root_certificate(
+        credential: ClientCredential,
+        authority: impl Into<String>,
+        extra_root_certificate_pem: &[u8],
+    ) -> Result<Self, TaskmasterError> {
+        Ok(Self {
+            client: Client::with_extra_root_certificate(extra_root_certificate_pem)?,
+            credential,
+            authority: authority.into(),
+        })
+    }
 }
 
 impl KernelPort for KernelClient {

@@ -34,22 +34,30 @@ spec:
           env:
             # In-cluster DNS name of infernal-law's own Service
             # (k8s/base/service.yaml in that repo). infernal-client-rs's
-            # SignedRequest always dials https://<authority> -- unlike
-            # infernal-inquisitor-simple's fetch_kernel_identity, which
-            # accepts an arbitrary scheme, this service's outbound calls
-            # require the kernel to actually terminate TLS at this
-            # authority. infernal-law's own Service does not do that yet
-            # (see that repo's k8s/base/service.yaml); a TLS-terminating
-            # layer in front of it is required before this deployment can
-            # actually reach the kernel, not just start.
+            # SignedRequest always dials https://<authority>, which
+            # reaches infernal-law's tls-proxy sidecar (see that repo's
+            # k8s/base/deployment.yaml), not its plain-HTTP listener
+            # directly.
             - name: KERNEL_AUTHORITY
               value: "infernal-law"
+            # infernal-law's tls-proxy sidecar uses a self-signed
+            # certificate for local/test deployments (see this repo's
+            # README), which this process must be told to trust
+            # explicitly -- see KERNEL_CA_CERT_PATH below and the
+            # kernel-ca-cert volume. Omit both for a kernel with an
+            # ordinary publicly-trusted certificate.
+            - name: KERNEL_CA_CERT_PATH
+              value: /etc/infernal-law/ca/ca.crt
             # Must already be provisioned as an identities row and
             # enrolled with the kernel (ADR-0008) before any call this
             # process signs will be accepted -- deployment configuration,
             # not something this manifest or the image itself performs.
             - name: TASKMASTER_SERVICE_ID
               value: "00000000-0000-4000-8000-000000000002"
+          volumeMounts:
+            - name: kernel-ca-cert
+              mountPath: /etc/infernal-law/ca
+              readOnly: true
           resources:
             requests:
               cpu: 10m
@@ -63,4 +71,15 @@ spec:
               drop:
                 - ALL
             readOnlyRootFilesystem: true
+      volumes:
+        # Not committed: create with, for example,
+        #   kubectl create configmap infernal-law-ca-cert \
+        #     --from-file=ca.crt=infernal-law-tls.crt
+        # using the same self-signed certificate infernal-law's tls-proxy
+        # sidecar serves (see this repo's README's Kubernetes section).
+        # A certificate is public information, so a ConfigMap (not a
+        # Secret) is the right primitive here.
+        - name: kernel-ca-cert
+          configMap:
+            name: infernal-law-ca-cert
       terminationGracePeriodSeconds: 10
