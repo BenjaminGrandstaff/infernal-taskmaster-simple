@@ -8,6 +8,7 @@
 
 pub mod claims;
 pub mod error;
+pub mod instance_lease;
 pub mod kernel_client;
 pub mod routes;
 pub mod scheduler;
@@ -19,6 +20,7 @@ use infernal_client::ClientCredential;
 use uuid::Uuid;
 
 use crate::error::TaskmasterError;
+use crate::instance_lease::RENEWAL_MARGIN_SECONDS;
 use crate::kernel_client::KernelClient;
 
 const KERNEL_AUTHORITY_ENV: &str = "KERNEL_AUTHORITY";
@@ -60,6 +62,23 @@ pub struct Config {
     pub client: KernelClient,
     pub lease_seconds: i64,
     pub poll_interval: Duration,
+    /// This process's own instance lease, tracked only when this process
+    /// performed its own enrollment at startup (see `run`'s renewal
+    /// logic). `None` when `ENROLLMENT_CHALLENGE` was unset because this
+    /// identity was already enrolled some other way -- there is no way to
+    /// discover another process's enrollment's current lease state after
+    /// the fact, so such a process cannot renew and simply keeps today's
+    /// behavior of failing once its lease expires.
+    pub instance_lease: Option<InstanceLease>,
+}
+
+/// This process's own registration lease with the kernel, tracked entirely
+/// client-side from the last enrollment or renewal response so `run` knows
+/// when to renew next and what revision to renew with.
+#[derive(Clone, Copy, Debug)]
+pub struct InstanceLease {
+    pub revision: i64,
+    pub expires_at: i64,
 }
 
 impl Config {
@@ -93,6 +112,7 @@ impl Config {
             }
             Err(_) => KernelClient::new(credential, authority)?,
         };
+        let mut instance_lease = None;
         if let Ok(challenge) = env::var(ENROLLMENT_CHALLENGE_ENV) {
             let endpoint = env::var(SERVICE_ENDPOINT_ENV)
                 .map_err(|_| TaskmasterError::MissingEnv(SERVICE_ENDPOINT_ENV))?;
@@ -107,11 +127,16 @@ impl Config {
             let challenge = decode_challenge(&challenge)?;
             let enrolled = client.enroll(challenge, &endpoint, &pod_uid, workload_token)?;
             println!("enrolled with the kernel: {enrolled:?}");
+            instance_lease = Some(InstanceLease {
+                revision: enrolled.lease_revision,
+                expires_at: enrolled.lease_expires_at,
+            });
         }
         Ok(Self {
             client,
             lease_seconds,
             poll_interval: Duration::from_secs(poll_interval_seconds),
+            instance_lease,
         })
     }
 }
@@ -134,14 +159,57 @@ fn decode_challenge(
 /// scheduler down entirely, and the kernel's own claim arbitration is what
 /// actually has to be correct, not this loop's uptime.
 pub fn run(config: Config) -> ! {
+    let Config {
+        client,
+        lease_seconds,
+        poll_interval,
+        mut instance_lease,
+    } = config;
     loop {
-        match scheduler::schedule_once(&config.client, config.lease_seconds) {
+        renew_lease_if_due(&client, &mut instance_lease);
+        match scheduler::schedule_once(&client, lease_seconds) {
             Ok(scheduler::ScheduleOutcome::NothingEligible) => {}
             Ok(scheduler::ScheduleOutcome::Proposed { route_id, outcome }) => {
                 println!("proposed claim for route {route_id}: {outcome:?}");
             }
             Err(error) => eprintln!("scheduling pass failed: {error}"),
         }
-        std::thread::sleep(config.poll_interval);
+        std::thread::sleep(poll_interval);
     }
+}
+
+/// Renews this process's own instance lease well before the kernel's
+/// grant expires -- see `InstanceLease`'s own documentation for why this
+/// is only possible when this process performed its own enrollment at
+/// startup. A failed renewal is logged and retried on the next tick, the
+/// same tolerance `run`'s own scheduling-pass loop already has for a
+/// transient kernel or network hiccup; if every attempt fails before the
+/// lease actually expires, every subsequent signed call -- including the
+/// next renewal attempt -- starts failing until this process restarts
+/// and re-enrolls, exactly as it always has.
+fn renew_lease_if_due(client: &KernelClient, instance_lease: &mut Option<InstanceLease>) {
+    let Some(lease) = instance_lease else {
+        return;
+    };
+    if unix_time() < lease.expires_at - RENEWAL_MARGIN_SECONDS {
+        return;
+    }
+    match client.renew_lease(lease.revision) {
+        Ok(renewed) => {
+            lease.revision = renewed.lease_revision;
+            lease.expires_at = renewed.lease_expires_at;
+            println!("renewed instance lease: {renewed:?}");
+        }
+        Err(error) => eprintln!("instance lease renewal failed: {error}"),
+    }
+}
+
+fn unix_time() -> i64 {
+    i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    )
+    .unwrap_or(i64::MAX)
 }

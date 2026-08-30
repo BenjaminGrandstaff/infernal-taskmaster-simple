@@ -25,6 +25,9 @@ use uuid::Uuid;
 
 use crate::claims::{ClaimOutcome, ClaimRequest, parse_claim_response};
 use crate::error::TaskmasterError;
+use crate::instance_lease::{
+    RENEW_INSTANCE_PATH, RenewedLease, parse_renewal_response, renewal_request_body,
+};
 use crate::routes::{ELIGIBLE_ROUTES_PATH, EligibleRoute, parse_eligible_routes};
 
 const SIGNATURE_VALIDITY_SECONDS: i64 = 30;
@@ -108,6 +111,27 @@ impl KernelClient {
             .client
             .submit_enrollment(&format!("https://{}", self.authority), &submission)?)
     }
+
+    /// Extends this instance's own registration lease before the kernel's
+    /// default 60-second grant expires -- the kernel has no way to renew a
+    /// lease that has *already* expired (every signed call, including
+    /// this one, is rejected once that happens), so `lib.rs`'s `run` calls
+    /// this proactively, well before the deadline. `expected_revision`
+    /// must be this instance's current `lease_revision`, from the last
+    /// enrollment or renewal -- a stale value is rejected rather than
+    /// silently accepted, the same optimistic-concurrency guard the
+    /// kernel's own work-claim leases use.
+    pub fn renew_lease(&self, expected_revision: i64) -> Result<RenewedLease, TaskmasterError> {
+        let signed = build_renewal_request(
+            &self.credential,
+            &self.authority,
+            expected_revision,
+            Uuid::new_v4(),
+            unix_time(),
+        )?;
+        let response = self.client.send(&signed)?;
+        parse_renewal_response(response.status, &response.body)
+    }
 }
 
 impl KernelPort for KernelClient {
@@ -179,6 +203,25 @@ fn build_claim_request(
     sign(credential, parts, now)
 }
 
+fn build_renewal_request(
+    credential: &ClientCredential,
+    authority: &str,
+    expected_revision: i64,
+    request_id: Uuid,
+    now: i64,
+) -> Result<SignedRequest, TaskmasterError> {
+    let body = renewal_request_body(expected_revision);
+    let parts = RequestParts::new(
+        "POST",
+        authority,
+        RENEW_INSTANCE_PATH,
+        "application/json",
+        &body,
+        request_id,
+    )?;
+    sign(credential, parts, now)
+}
+
 fn sign(
     credential: &ClientCredential,
     parts: RequestParts,
@@ -240,6 +283,20 @@ mod tests {
         let verified =
             verify_incoming(&incoming_from(&signed), credential.public_key(), 1_005).unwrap();
         assert_eq!(verified.service_id(), credential.public_key().service_id());
+    }
+
+    #[test]
+    fn the_renewal_request_targets_the_instances_path_and_carries_the_expected_revision() {
+        let credential = ClientCredential::generate(Uuid::new_v4());
+
+        let signed =
+            build_renewal_request(&credential, "kernel.example.test", 3, Uuid::new_v4(), 1_000)
+                .unwrap();
+
+        assert_eq!(signed.parts().method(), "POST");
+        assert_eq!(signed.parts().path_and_query(), RENEW_INSTANCE_PATH);
+        assert_eq!(signed.parts().body(), br#"{"expected_revision":3}"#);
+        verify_incoming(&incoming_from(&signed), credential.public_key(), 1_005).unwrap();
     }
 
     #[test]

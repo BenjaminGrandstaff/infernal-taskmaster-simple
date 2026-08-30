@@ -136,6 +136,16 @@ rest of the vertical slice — nothing in this ecosystem yet submits a
 signed `POST /v1/requests`, so a full submit-to-complete round trip needs
 a separate enrolled test identity for that role.
 
+A related gap, found live by `infernal-librarian-simple` and fixed in
+`infernal-law` (`POST /v1/instances/renew`): an enrolled instance's lease
+defaults to 60 seconds, and this scheduler's poll loop would start
+failing every call with 401 once it had been running that long, with no
+way to recover short of a full restart and a fresh operator-issued
+enrollment challenge. `src/kernel_client.rs`'s `renew_lease` and
+`lib.rs`'s `run` now renew this scheduler's own lease proactively,
+`RENEWAL_MARGIN_SECONDS` before it expires, the same fix proven live in
+`infernal-librarian-simple`.
+
 ## Development
 
 ```sh
