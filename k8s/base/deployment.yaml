@@ -63,13 +63,14 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.uid
-            # Set to a real ADR-0008 challenge (base64url, 32 bytes) from
-            # a kernel operator's own out-of-band challenge issuance to
-            # perform enrollment on the next restart; unset (the default)
-            # skips enrollment entirely, matching this process's prior
-            # behavior. See ENROLLMENT_CHALLENGE's own documentation in
-            # src/lib.rs for why there is no self-service way to obtain
-            # one instead.
+            # Left unset on purpose. This process now obtains its own
+            # ADR-0008 challenge from the kernel
+            # (POST /v1/enrollments/challenges, ADR-0015), authenticated by
+            # the projected ServiceAccount token mounted below, so every
+            # Pod enrolls itself -- including one that replaces a crashed
+            # or rescheduled predecessor. Setting it to a real challenge
+            # (base64url, 32 bytes) overrides that and is single-use, so an
+            # injected value works exactly once per Deployment revision.
             # - name: ENROLLMENT_CHALLENGE
             #   value: ""
           volumeMounts:

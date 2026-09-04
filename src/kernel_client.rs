@@ -93,6 +93,23 @@ impl KernelClient {
     /// this `KernelClient` will go on to sign ordinary requests with:
     /// enrollment registers a specific public key, not a service identity
     /// in the abstract.
+    /// Asks the kernel to issue this workload its own enrollment challenge.
+    /// Used when `ENROLLMENT_CHALLENGE` is unset, which is the normal case:
+    /// a challenge is single-use, so an injected one survives only the
+    /// first Pod of a Deployment revision.
+    pub fn request_challenge(
+        &self,
+        pod_uid: &str,
+        workload_token: &str,
+    ) -> Result<[u8; CHALLENGE_LENGTH], TaskmasterError> {
+        let issued = self.client.request_enrollment_challenge(
+            &format!("https://{}", self.authority),
+            pod_uid,
+            workload_token,
+        )?;
+        Ok(issued.challenge_bytes()?)
+    }
+
     pub fn enroll(
         &self,
         challenge: [u8; CHALLENGE_LENGTH],

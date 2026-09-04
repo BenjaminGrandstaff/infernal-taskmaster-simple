@@ -7,7 +7,7 @@ rust-version = "1.85"
 
 [dependencies]
 base64 = "0.22.1"
-infernal-client-rs = { git = "https://github.com/BenjaminGrandstaff/infernal-client-rs", rev = "be3244add8899e253686cdccdf59d8ea71ea79ac" }
+infernal-client-rs = { git = "https://github.com/BenjaminGrandstaff/infernal-client-rs", rev = "f6076f2b294e38366d1ae65d722ca330eb74c246" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1.26.0", features = ["v4"] }
