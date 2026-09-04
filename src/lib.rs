@@ -8,6 +8,7 @@
 
 pub mod claims;
 pub mod error;
+pub mod health;
 pub mod instance_lease;
 pub mod kernel_client;
 pub mod routes;
@@ -164,7 +165,7 @@ fn decode_challenge(
 /// the process -- a transient kernel or network hiccup should not take a
 /// scheduler down entirely, and the kernel's own claim arbitration is what
 /// actually has to be correct, not this loop's uptime.
-pub fn run(config: Config) -> ! {
+pub fn run(config: Config, heartbeat: health::Heartbeat) -> ! {
     let Config {
         client,
         lease_seconds,
@@ -174,8 +175,15 @@ pub fn run(config: Config) -> ! {
     loop {
         renew_lease_if_due(&client, &mut instance_lease);
         match scheduler::schedule_once(&client, lease_seconds) {
-            Ok(scheduler::ScheduleOutcome::NothingEligible) => {}
+            // Both outcomes are a *successful* pass: having nothing
+            // eligible to schedule is a healthy answer from the kernel, not
+            // a failure, so it must keep the heartbeat fresh. Only an error
+            // leaves it to go stale.
+            Ok(scheduler::ScheduleOutcome::NothingEligible) => {
+                heartbeat.record_success(health::now_seconds());
+            }
             Ok(scheduler::ScheduleOutcome::Proposed { route_id, outcome }) => {
+                heartbeat.record_success(health::now_seconds());
                 println!("proposed claim for route {route_id}: {outcome:?}");
             }
             Err(error) => eprintln!("scheduling pass failed: {error}"),

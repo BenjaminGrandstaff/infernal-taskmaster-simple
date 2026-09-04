@@ -26,11 +26,37 @@ spec:
         - name: infernal-taskmaster-simple
           image: localhost/infernal-taskmaster-simple:latest
           imagePullPolicy: IfNotPresent
-          # No ports: this service only ever makes outbound signed calls
-          # into the kernel: it never listens for inbound connections, so
-          # it has no HTTP surface for a liveness/readiness probe to
-          # check. Kubernetes' own container restart policy is what
-          # recovers a crashed process.
+          # A health listener, and nothing else. This service's real work
+          # is entirely outbound, so without this a process that cannot
+          # enroll -- or whose instance lease has expired and can no longer
+          # be renewed -- keeps running and logging while Kubernetes sees a
+          # healthy container.
+          #
+          # Liveness is the one that matters: nothing routes traffic here,
+          # so "not ready" changes nothing by itself, but an expired lease
+          # is only recoverable by restarting and enrolling again. The
+          # restart policy recovers a *crashed* process; this recovers a
+          # stuck one.
+          ports:
+            - name: health
+              containerPort: 8090
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: health
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          # failureThreshold x periodSeconds must exceed the health module's
+          # own live_stale_seconds, so the decision to restart is made by
+          # that threshold rather than accidentally by probe timing.
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
           env:
             # In-cluster DNS name of infernal-law's own Service
             # (k8s/base/service.yaml in that repo). infernal-client-rs's
